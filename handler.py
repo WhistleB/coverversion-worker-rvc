@@ -21,7 +21,7 @@ import runpod
 import numpy as np
 
 # ── Constants ────────────────────────────────────────────────────
-RVC_DIR = "/app/Retrieval-based-Voice-Conversion-WebUI"
+RVC_WEBUI_DIR = "/app/rvc-webui"
 VOLUME_DIR = "/runpod-volume"
 MODELS_DIR = os.path.join(VOLUME_DIR, "rvc_models")
 
@@ -134,61 +134,80 @@ def handle_train(job_input, tmpdir):
 
     model_name = f"rvc_{user_id}"
 
-    # 4. Preprocess
-    print("[Train] Step 1/3: Preprocess...")
-    preprocess_cmd = [
-        "python", os.path.join(RVC_DIR, "rvc_cli.py"), "preprocess",
-        "--model_name", model_name,
-        "--dataset_path", dataset_dir,
-        "--sampling_rate", str(sample_rate),
-    ]
-    result = subprocess.run(preprocess_cmd, capture_output=True, text=True, timeout=120, cwd=RVC_DIR)
-    if result.returncode != 0:
-        raise RuntimeError(f"Preprocess failed: {result.stderr[-300:]}")
-    print(f"[Train] Preprocess done")
+    # 4. Use RVC WebUI's internal training pipeline via subprocess script
+    train_script = f"""
+import sys, os
+sys.path.insert(0, '/app/rvc-webui')
+os.chdir('/app/rvc-webui')
 
-    # 5. Extract features
-    print("[Train] Step 2/3: Extract features...")
-    extract_cmd = [
-        "python", os.path.join(RVC_DIR, "rvc_cli.py"), "extract",
-        "--model_name", model_name,
-        "--rvc_version", "v2",
-        "--pitch_guidance", "True",
-        "--hop_length", "128",
-        "--sampling_rate", str(sample_rate),
-    ]
-    result = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=180, cwd=RVC_DIR)
-    if result.returncode != 0:
-        raise RuntimeError(f"Extract failed: {result.stderr[-300:]}")
-    print(f"[Train] Extract done")
+from infer.modules.train.preprocess import PreProcess
+from infer.modules.train.extract.extract_f0_rmvpe import FeatureInput
+import traceback
 
-    # 6. Train
-    print(f"[Train] Step 3/3: Training {epochs} epochs...")
-    train_cmd = [
-        "python", os.path.join(RVC_DIR, "rvc_cli.py"), "train",
-        "--model_name", model_name,
-        "--rvc_version", "v2",
-        "--save_every_epoch", "50",
-        "--total_epoch", str(epochs),
-        "--sampling_rate", str(sample_rate),
-        "--batch_size", str(batch_size),
-        "--gpu", "0",
-        "--pitch_guidance", "True",
-    ]
-    result = subprocess.run(train_cmd, capture_output=True, text=True, timeout=600, cwd=RVC_DIR)
+model_name = '{model_name}'
+sr = {sample_rate}
+dataset = '{dataset_dir}'
+exp_dir = os.path.join('logs', model_name)
+os.makedirs(exp_dir, exist_ok=True)
+
+try:
+    # Step 1: Preprocess
+    print('[Train] Preprocessing...')
+    from infer.modules.train import preprocess
+    preprocess.preprocess_trainset(dataset, sr, 2, exp_dir)
+    print('[Train] Preprocess done')
+
+    # Step 2: Extract f0
+    print('[Train] Extracting f0...')
+    os.system(f'python infer/modules/train/extract_f0_print.py {{exp_dir}} {{sr}} 1')
+    print('[Train] F0 extraction done')
+
+    # Step 3: Extract features
+    print('[Train] Extracting features...')
+    os.system(f'python infer/modules/train/extract_feature_print.py cuda:0 1 0 0 {{exp_dir}} v2')
+    print('[Train] Feature extraction done')
+
+    # Step 4: Train
+    print('[Train] Training {epochs} epochs...')
+    os.system(f'python infer/modules/train/train.py -e {{model_name}} -sr {{sr}} -f0 1 -bs {batch_size} -te {epochs} -se 50 -pg assets/pretrained_v2/f0G48k.pth -pd assets/pretrained_v2/f0D48k.pth -l 0 -c 0 -sw 1 -v v2')
+    print('[Train] Training done')
+
+except Exception as e:
+    print(f'[Train] Error: {{e}}')
+    traceback.print_exc()
+    sys.exit(1)
+"""
+    script_path = os.path.join(tmpdir, "train_rvc.py")
+    with open(script_path, "w") as f:
+        f.write(train_script)
+
+    print("[Train] Running training pipeline...")
+    result = subprocess.run(
+        ["python", script_path],
+        capture_output=True, text=True, timeout=600,
+        env={**os.environ, "PYTHONPATH": f"/app/rvc-webui:{os.environ.get('PYTHONPATH', '')}"},
+    )
+    print(f"[Train] STDOUT: {result.stdout[-500:]}")
+    if result.stderr:
+        print(f"[Train] STDERR: {result.stderr[-300:]}")
     if result.returncode != 0:
         raise RuntimeError(f"Train failed: {result.stderr[-300:]}")
-    print(f"[Train] Training done")
 
-    # 7. Find and copy trained model to volume
-    # RVC saves models to logs/{model_name}/
-    logs_dir = os.path.join(RVC_DIR, "logs", model_name)
+    # 5. Find and copy trained model to volume
+    logs_dir = os.path.join("/app/rvc-webui/logs", model_name)
     pth_files = [f for f in os.listdir(logs_dir) if f.endswith(".pth")] if os.path.exists(logs_dir) else []
 
     if not pth_files:
-        raise RuntimeError(f"No .pth model found in {logs_dir}")
+        # Also check weights directory
+        weights_dir = os.path.join("/app/rvc-webui/assets/weights")
+        if os.path.exists(weights_dir):
+            pth_files = [f for f in os.listdir(weights_dir) if model_name in f and f.endswith(".pth")]
+            if pth_files:
+                logs_dir = weights_dir
 
-    # Get the latest .pth
+    if not pth_files:
+        raise RuntimeError(f"No .pth model found after training")
+
     pth_files.sort()
     best_pth = pth_files[-1]
     src_pth = os.path.join(logs_dir, best_pth)
@@ -196,12 +215,14 @@ def handle_train(job_input, tmpdir):
     shutil.copy(src_pth, dst_pth)
 
     # Copy index file if exists
-    index_files = [f for f in os.listdir(logs_dir) if f.endswith(".index")]
+    index_files = []
+    for d in [logs_dir, os.path.join("/app/rvc-webui/logs", model_name)]:
+        if os.path.exists(d):
+            index_files += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".index")]
     dst_index = None
     if index_files:
-        src_index = os.path.join(logs_dir, index_files[-1])
         dst_index = os.path.join(model_dir, "model.index")
-        shutil.copy(src_index, dst_index)
+        shutil.copy(index_files[-1], dst_index)
 
     model_size_mb = os.path.getsize(dst_pth) / (1024 * 1024)
     print(f"[Train] Model saved: {dst_pth} ({model_size_mb:.1f} MB)")
@@ -269,29 +290,45 @@ def handle_infer(job_input, tmpdir):
     if not os.path.exists(vocals_path):
         raise RuntimeError("Vocal separation failed")
 
-    # 4. RVC inference
+    # 4. RVC inference using rvc-python or rvc package
     print("[Infer] Running RVC inference...")
     output_wav = os.path.join(tmpdir, "rvc_output.wav")
 
-    infer_cmd = [
-        "python", os.path.join(RVC_DIR, "rvc_cli.py"), "infer",
-        "--input_path", vocals_path,
-        "--output_path", output_wav,
-        "--pth_path", model_path,
-        "--index_path", index_path if os.path.exists(index_path) else "",
-        "--pitch", str(pitch_shift),
-        "--index_rate", str(index_rate),
-        "--filter_radius", str(filter_radius),
-        "--f0method", "rmvpe",
-    ]
-    # Remove empty index_path arg if no index
-    if not os.path.exists(index_path):
-        infer_cmd = [c for c in infer_cmd if c != "--index_path" and c != ""]
+    infer_script = f"""
+import sys
+try:
+    from rvc.modules.vc.modules import VC
+    from pathlib import Path
+    from scipy.io import wavfile
+
+    vc = VC()
+    vc.get_vc('{model_path}')
+    tgt_sr, audio_opt, times, _ = vc.vc_single(
+        sid=0,
+        input_audio_path=Path('{vocals_path}'),
+        f0_up_key={pitch_shift},
+        f0_method='rmvpe',
+        index_file='{index_path}' if '{index_path}' and __import__('os').path.exists('{index_path}') else '',
+        index_rate={index_rate},
+        filter_radius={filter_radius},
+        protect=0.33,
+    )
+    wavfile.write('{output_wav}', tgt_sr, audio_opt)
+    print(f'RVC inference done, sr={{tgt_sr}}')
+except Exception as e:
+    print(f'Error: {{e}}')
+    import traceback; traceback.print_exc()
+    sys.exit(1)
+"""
+    script_path = os.path.join(tmpdir, "rvc_infer.py")
+    with open(script_path, "w") as f:
+        f.write(infer_script)
 
     start = time.time()
-    result = subprocess.run(infer_cmd, capture_output=True, text=True, timeout=300, cwd=RVC_DIR)
+    result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=300)
     infer_time = time.time() - start
 
+    print(f"[Infer] STDOUT: {result.stdout[-300:]}")
     if result.returncode != 0:
         raise RuntimeError(f"RVC inference failed: {result.stderr[-300:]}")
 
