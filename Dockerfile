@@ -11,13 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Clone RVC WebUI (contains training + inference CLI)
 RUN git clone --depth 1 https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI.git /app/Retrieval-based-Voice-Conversion-WebUI
 
-# Install RVC dependencies
+# Install RVC dependencies (skip torch to keep base image version)
+RUN grep -v -E "^torch==|^torchvision==|^torchaudio==" /app/Retrieval-based-Voice-Conversion-WebUI/requirements.txt > /tmp/rvc_reqs.txt \
+    && pip install --no-cache-dir -r /tmp/rvc_reqs.txt || true
+
+# Install our dependencies
 RUN pip install --no-cache-dir \
     runpod \
     requests \
     pedalboard \
-    demucs \
-    && pip install --no-cache-dir -r /app/Retrieval-based-Voice-Conversion-WebUI/requirements.txt
+    demucs
 
 # Pre-generate matplotlib font cache
 RUN pip install --no-cache-dir matplotlib && python -c "import matplotlib; print('Font cache generated')" || true
