@@ -159,7 +159,7 @@ def handle_train(job_input, tmpdir):
 
     # Step 2: Extract F0
     run_step("Extract F0", [
-        "python", "infer/modules/train/extract_f0_print.py",
+        "python", "infer/modules/train/extract/extract_f0_print.py",
         exp_dir, str(sample_rate), "1",
     ])
 
