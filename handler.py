@@ -151,10 +151,10 @@ def handle_train(job_input, tmpdir):
         print(f"[Train] {step_name} done")
 
     # Step 1: Preprocess
-    # Args: inp_root, sr, n_p, exp_dir, per
+    # Args: inp_root, sr, n_p, exp_dir, per, noparallel
     run_step("Preprocess", [
         "python", "infer/modules/train/preprocess.py",
-        dataset_dir, str(sample_rate), "2", exp_dir, "3.7",
+        dataset_dir, str(sample_rate), "2", exp_dir, "3.7", "1",
     ])
 
     # Step 2: Extract F0
