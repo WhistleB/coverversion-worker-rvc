@@ -158,9 +158,10 @@ def handle_train(job_input, tmpdir):
     ])
 
     # Step 2: Extract F0
+    # Args: exp_dir, n_processes, f0method
     run_step("Extract F0", [
         "python", "infer/modules/train/extract/extract_f0_print.py",
-        exp_dir, str(sample_rate), "1",
+        exp_dir, "1", "rmvpe",
     ])
 
     # Step 3: Extract features
