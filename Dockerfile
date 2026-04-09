@@ -31,8 +31,33 @@ RUN git clone --depth 1 https://github.com/RVC-Project/Retrieval-based-Voice-Con
 RUN grep -v -E "^torch==|^torchvision==|^torchaudio==|^numba==|^llvmlite==|^numpy==|^fairseq==|^faiss-cpu==|^gradio==|^fastapi==|^ffmpy==|^torchcrepe==|^pyworld==" /app/rvc-webui/requirements.txt > /tmp/rvc_reqs.txt \
     && pip install --no-cache-dir numba librosa \
     && pip install --no-cache-dir -r /tmp/rvc_reqs.txt || true \
-    && pip install --no-cache-dir fairseq --no-deps || true \
-    && pip install --no-cache-dir omegaconf hydra-core av pydub tensorboardX
+    && pip install --no-cache-dir omegaconf hydra-core av pydub tensorboardX \
+    && pip install --no-cache-dir fairseq==0.12.2 --no-deps || true
+
+# Fix fairseq dataclass issue with Python 3.11
+RUN pip install --no-cache-dir fairseq --no-deps 2>/dev/null || \
+    (cd /tmp && git clone --depth 1 https://github.com/facebookresearch/fairseq.git && \
+     cd fairseq && pip install --no-deps -e . || true)
+
+# Download RMVPE model for F0 extraction
+RUN mkdir -p /app/rvc-webui/assets/rmvpe && \
+    python -c "\
+from huggingface_hub import hf_hub_download; \
+hf_hub_download('lj1995/VoiceConversionWebUI', 'rmvpe.pt', local_dir='/app/rvc-webui/assets/rmvpe'); \
+print('RMVPE downloaded')" || echo "RMVPE download skipped"
+
+# Download HuBERT model
+RUN mkdir -p /app/rvc-webui/assets/hubert && \
+    python -c "\
+from huggingface_hub import hf_hub_download; \
+hf_hub_download('lj1995/VoiceConversionWebUI', 'hubert_base.pt', local_dir='/app/rvc-webui/assets/hubert'); \
+print('HuBERT downloaded')" || echo "HuBERT download skipped"
+
+# Download pretrained v2 models
+RUN python -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download('lj1995/VoiceConversionWebUI', local_dir='/app/rvc-webui/assets', allow_patterns=['pretrained_v2/*']); \
+print('Pretrained v2 downloaded')" || echo "Pretrained v2 download skipped"
 
 # Install rvc package for inference
 RUN pip install --no-cache-dir rvc || true
