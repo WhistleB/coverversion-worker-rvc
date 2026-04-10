@@ -244,45 +244,59 @@ def handle_train(job_input, tmpdir):
         "-v", "v2",
     ], timeout_sec=600)
 
-    # 5. Find and copy trained model to volume
+    # 5. Convert raw G_*.pth checkpoint into slim inference model.
+    # train.py only writes G_*.pth/D_*.pth (full optimizer state ~430MB) — these
+    # don't have the {"config", "weight", "info"} keys that VC.get_vc() expects.
+    # WebUI's "training done" callback runs extract_small_model() to produce a
+    # ~55MB inference-ready file under assets/weights/{name}.pth. We replicate it.
     logs_dir = os.path.join("/app/rvc-webui/logs", model_name)
-
-    # Debug: list all files in logs dir
     if os.path.exists(logs_dir):
-        all_files = os.listdir(logs_dir)
-        print(f"[Train] Files in {logs_dir}: {all_files}")
-    else:
-        print(f"[Train] WARNING: {logs_dir} does not exist!")
+        print(f"[Train] Files in {logs_dir}: {os.listdir(logs_dir)}")
 
-    pth_files = [f for f in os.listdir(logs_dir) if f.endswith(".pth")] if os.path.exists(logs_dir) else []
+    g_files = sorted([f for f in os.listdir(logs_dir)
+                      if f.startswith("G_") and f.endswith(".pth")]) if os.path.exists(logs_dir) else []
+    if not g_files:
+        raise RuntimeError(f"No G_*.pth checkpoint found in {logs_dir}")
+    g_path = os.path.join(logs_dir, g_files[-1])
+    print(f"[Train] Using G checkpoint: {g_path}")
 
-    if not pth_files:
-        # Check weights directory
-        weights_dir = os.path.join("/app/rvc-webui/assets/weights")
-        if os.path.exists(weights_dir):
-            all_weights = os.listdir(weights_dir)
-            print(f"[Train] Files in weights dir: {all_weights}")
-            pth_files = [f for f in all_weights if model_name in f and f.endswith(".pth")]
-            if pth_files:
-                logs_dir = weights_dir
+    # Run extract_small_model in the WebUI's own context (it uses relative paths)
+    extract_script = f"""
+import sys, os
+sys.path.insert(0, '/app/rvc-webui')
+os.chdir('/app/rvc-webui')
+from infer.lib.train.process_ckpt import extract_small_model
+result = extract_small_model(
+    '{g_path}',
+    '{model_name}',
+    '{sr_key}',
+    True,
+    'Trained on RunPod Serverless',
+    'v2',
+)
+print(f'extract_small_model: {{result}}')
+"""
+    extract_path = os.path.join(tmpdir, "extract.py")
+    with open(extract_path, "w") as f:
+        f.write(extract_script)
+    er = subprocess.run(["python", extract_path], capture_output=True, text=True, timeout=120, cwd=webui)
+    print(f"[Train] extract STDOUT: {er.stdout}")
+    if er.stderr:
+        print(f"[Train] extract STDERR: {er.stderr[-300:]}")
+    if er.returncode != 0:
+        raise RuntimeError(f"extract_small_model failed: {er.stderr[-300:]}")
 
-    if not pth_files:
-        # Check if training actually produced any output
-        for root, dirs, files in os.walk(os.path.join("/app/rvc-webui/logs")):
-            pth_in_tree = [f for f in files if f.endswith(".pth")]
-            if pth_in_tree:
-                print(f"[Train] Found .pth files at {root}: {pth_in_tree}")
-        raise RuntimeError(f"No .pth model found after training. Check logs above for file locations.")
+    # The slim model is now at assets/weights/{model_name}.pth
+    slim_pth = os.path.join("/app/rvc-webui/assets/weights", f"{model_name}.pth")
+    if not os.path.exists(slim_pth):
+        raise RuntimeError(f"Slim inference model missing at {slim_pth}")
 
-    pth_files.sort()
-    best_pth = pth_files[-1]
-    src_pth = os.path.join(logs_dir, best_pth)
     dst_pth = os.path.join(model_dir, "model.pth")
-    shutil.copy(src_pth, dst_pth)
+    shutil.copy(slim_pth, dst_pth)
 
     # Copy index file if exists
     index_files = []
-    for d in [logs_dir, os.path.join("/app/rvc-webui/logs", model_name)]:
+    for d in [logs_dir]:
         if os.path.exists(d):
             index_files += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".index")]
     dst_index = None
