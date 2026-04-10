@@ -209,18 +209,33 @@ def handle_train(job_input, tmpdir):
 
     # 5. Find and copy trained model to volume
     logs_dir = os.path.join("/app/rvc-webui/logs", model_name)
+
+    # Debug: list all files in logs dir
+    if os.path.exists(logs_dir):
+        all_files = os.listdir(logs_dir)
+        print(f"[Train] Files in {logs_dir}: {all_files}")
+    else:
+        print(f"[Train] WARNING: {logs_dir} does not exist!")
+
     pth_files = [f for f in os.listdir(logs_dir) if f.endswith(".pth")] if os.path.exists(logs_dir) else []
 
     if not pth_files:
-        # Also check weights directory
+        # Check weights directory
         weights_dir = os.path.join("/app/rvc-webui/assets/weights")
         if os.path.exists(weights_dir):
-            pth_files = [f for f in os.listdir(weights_dir) if model_name in f and f.endswith(".pth")]
+            all_weights = os.listdir(weights_dir)
+            print(f"[Train] Files in weights dir: {all_weights}")
+            pth_files = [f for f in all_weights if model_name in f and f.endswith(".pth")]
             if pth_files:
                 logs_dir = weights_dir
 
     if not pth_files:
-        raise RuntimeError(f"No .pth model found after training")
+        # Check if training actually produced any output
+        for root, dirs, files in os.walk(os.path.join("/app/rvc-webui/logs")):
+            pth_in_tree = [f for f in files if f.endswith(".pth")]
+            if pth_in_tree:
+                print(f"[Train] Found .pth files at {root}: {pth_in_tree}")
+        raise RuntimeError(f"No .pth model found after training. Check logs above for file locations.")
 
     pth_files.sort()
     best_pth = pth_files[-1]
