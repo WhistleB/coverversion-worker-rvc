@@ -372,10 +372,19 @@ def handle_infer(job_input, tmpdir):
 
     output_wav = os.path.join(tmpdir, "rvc_output.wav")
 
+    protect = float(job_input.get("protect", 0.33))
+    rms_mix_rate = float(job_input.get("rms_mix_rate", 0.25))
+    f0_method = job_input.get("f0_method", "rmvpe")
+
     infer_script = f"""
 import sys, os
 sys.path.insert(0, '/app/rvc-webui')
 os.chdir('/app/rvc-webui')
+# RVC WebUI reads these from .env at import time. We don't go through .env, so set them here.
+os.environ['weight_root'] = 'assets/weights'
+os.environ['index_root'] = 'logs'
+os.environ['rmvpe_root'] = 'assets/rmvpe'
+os.environ['outside_index_root'] = 'logs'
 try:
     from configs.config import Config
     from infer.modules.vc.modules import VC
@@ -388,11 +397,13 @@ try:
         sid=0,
         input_audio_path='{vocals_path}',
         f0_up_key={pitch_shift},
-        f0_method='rmvpe',
+        f0_method='{f0_method}',
         file_index='{index_arg}',
         index_rate={index_rate},
         filter_radius={filter_radius},
-        protect=0.33,
+        resample_sr=0,
+        rms_mix_rate={rms_mix_rate},
+        protect={protect},
     )
     wavfile.write('{output_wav}', tgt_sr, audio_opt)
     print(f'RVC inference done, sr={{tgt_sr}}')
