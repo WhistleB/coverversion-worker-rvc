@@ -191,6 +191,40 @@ def handle_train(job_input, tmpdir):
     else:
         print(f"[Train] config.json: exists={os.path.exists(config_save)}, template={os.path.exists(config_path)}")
 
+    # Step 3.6: Generate filelist.txt (normally done by click_train in WebUI)
+    # train.py reads this file to know which training samples to load.
+    import random as _random
+    gt_wavs_dir = os.path.join(exp_dir, "0_gt_wavs")
+    feature_dir = os.path.join(exp_dir, "3_feature768")  # v2
+    f0_dir = os.path.join(exp_dir, "2a_f0")
+    f0nsf_dir = os.path.join(exp_dir, "2b-f0nsf")
+    spk_id5 = 0
+    names = (
+        set([n.split(".")[0] for n in os.listdir(gt_wavs_dir)])
+        & set([n.split(".")[0] for n in os.listdir(feature_dir)])
+        & set([n.split(".")[0] for n in os.listdir(f0_dir)])
+        & set([n.split(".")[0] for n in os.listdir(f0nsf_dir)])
+    )
+    print(f"[Train] filelist intersect: {len(names)} samples")
+    opt = []
+    for name in names:
+        opt.append(
+            "%s/%s.wav|%s/%s.npy|%s/%s.wav.npy|%s/%s.wav.npy|%s"
+            % (gt_wavs_dir, name, feature_dir, name, f0_dir, name, f0nsf_dir, name, spk_id5)
+        )
+    fea_dim = 768  # v2
+    now_dir = webui
+    for _ in range(2):
+        opt.append(
+            "%s/logs/mute/0_gt_wavs/mute%s.wav|%s/logs/mute/3_feature%s/mute.npy|%s/logs/mute/2a_f0/mute.wav.npy|%s/logs/mute/2b-f0nsf/mute.wav.npy|%s"
+            % (now_dir, sr_key, now_dir, fea_dim, now_dir, now_dir, spk_id5)
+        )
+    _random.shuffle(opt)
+    filelist_path = os.path.join(exp_dir, "filelist.txt")
+    with open(filelist_path, "w") as f:
+        f.write("\n".join(opt))
+    print(f"[Train] filelist.txt written: {len(opt)} entries → {filelist_path}")
+
     # Step 4: Train model
     # Official: -e name -sr sr -f0 1 -bs batch -g gpus -te epochs -se save -pg G.pth -pd D.pth -l save_latest -c cache_gpu -sw save_weights -v version
     run_step("Train", [
