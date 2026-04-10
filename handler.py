@@ -481,6 +481,24 @@ def handler(job):
         print("[Warmup] Worker ready.")
         return {"status": "warm"}
 
+    # Check if a trained model exists for the given user_id
+    if mode == "check_model":
+        user_id = job_input.get("user_id", "").strip()
+        if not user_id:
+            return {"status": "error", "error": "user_id required"}
+        model_path = os.path.join(MODELS_DIR, user_id, "model.pth")
+        index_path = os.path.join(MODELS_DIR, user_id, "model.index")
+        exists = os.path.exists(model_path)
+        size_mb = round(os.path.getsize(model_path) / 1024 / 1024, 2) if exists else 0
+        print(f"[CheckModel] user_id={user_id} exists={exists} size={size_mb}MB")
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "exists": exists,
+            "size_mb": size_mb,
+            "has_index": os.path.exists(index_path),
+        }
+
     print(f"\n{'='*60}")
     print(f"[Job] mode={mode}")
     print(f"{'='*60}")
