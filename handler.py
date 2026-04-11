@@ -452,7 +452,13 @@ except Exception as e:
 
     print(f"[Infer] RVC done in {infer_time:.1f}s")
 
-    # 5. Mix with instrumental
+    # 5. Apply FX to vocals ONLY (before mixing) — KTV reverb on vocals,
+    #    instrumental stays clean. Volume gain also only affects vocals.
+    if vocal_volume != 1.0 or reverb > 0:
+        output_wav = apply_post_fx(output_wav, vocal_volume, reverb)
+
+    # 6. Mix processed vocals with original instrumental.
+    #    normalize=0 keeps original loudness instead of /N.
     print("[Infer] Mixing...")
     final_wav = os.path.join(tmpdir, "final_cover.wav")
     mix_cmd = [
@@ -460,15 +466,11 @@ except Exception as e:
         "-i", output_wav,
         "-i", instrumental_path,
         "-filter_complex",
-        "[0:a][1:a]amix=inputs=2:duration=longest",
+        "[0:a][1:a]amix=inputs=2:duration=longest:weights=1 1:normalize=0",
         "-ac", "2", "-ar", "44100",
         final_wav,
     ]
     subprocess.run(mix_cmd, capture_output=True, timeout=120)
-
-    # 6. Post FX
-    if vocal_volume != 1.0 or reverb > 0:
-        final_wav = apply_post_fx(final_wav, vocal_volume, reverb)
 
     # 7. Format conversion + cover image
     import torchaudio
