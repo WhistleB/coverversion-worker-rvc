@@ -248,7 +248,7 @@ def handle_train(job_input, tmpdir):
         "-c", "0",
         "-sw", "1",
         "-v", "v2",
-    ], timeout_sec=600)
+    ], timeout_sec=3600)
 
     # 5. Convert raw G_*.pth checkpoint into slim inference model.
     # train.py only writes G_*.pth/D_*.pth (full optimizer state ~430MB) — these
