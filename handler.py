@@ -407,17 +407,20 @@ try:
     config = Config()
     vc = VC(config)
     vc.get_vc('{model_basename}')
+    # NOTE: this RVC fork requires positional args including f0_file and file_index2
     tgt_sr, audio_opt, times, _ = vc.vc_single(
-        sid=0,
-        input_audio_path='{vocals_path}',
-        f0_up_key={pitch_shift},
-        f0_method='{f0_method}',
-        file_index='{index_arg}',
-        index_rate={index_rate},
-        filter_radius={filter_radius},
-        resample_sr=0,
-        rms_mix_rate={rms_mix_rate},
-        protect={protect},
+        0,                    # sid
+        '{vocals_path}',      # input_audio_path
+        {pitch_shift},        # f0_up_key
+        None,                 # f0_file
+        '{f0_method}',        # f0_method
+        '{index_arg}',        # file_index
+        '',                   # file_index2
+        {index_rate},         # index_rate
+        {filter_radius},      # filter_radius
+        0,                    # resample_sr
+        {rms_mix_rate},       # rms_mix_rate
+        {protect},            # protect
     )
     wavfile.write('{output_wav}', tgt_sr, audio_opt)
     print(f'RVC inference done, sr={{tgt_sr}}')
