@@ -112,21 +112,27 @@ def handle_train(job_input, tmpdir):
     Output: model saved to /runpod-volume/rvc_models/{user_id}/
     """
     user_id = job_input["user_id"]
-    voice_url = job_input["voice_url"]
+    # Accept either voice_urls (array) or legacy voice_url (single)
+    voice_urls = job_input.get("voice_urls")
+    if not voice_urls:
+        single = job_input.get("voice_url")
+        if single:
+            voice_urls = [single]
+    if not voice_urls:
+        raise ValueError("voice_url or voice_urls required")
     sample_rate = int(job_input.get("sample_rate", 48000))
     epochs = int(job_input.get("epochs", 200))
     batch_size = int(job_input.get("batch_size", 4))
 
-    print(f"[Train] user_id={user_id}, sr={sample_rate}, epochs={epochs}, batch={batch_size}")
+    print(f"[Train] user_id={user_id}, sr={sample_rate}, epochs={epochs}, batch={batch_size}, files={len(voice_urls)}")
 
-    # 1. Download voice audio
-    voice_path = os.path.join(tmpdir, "voice.wav")
-    download_file(voice_url, voice_path)
-
-    # 2. Prepare dataset directory
+    # 1. Prepare dataset directory and download all voice files
     dataset_dir = os.path.join(tmpdir, "dataset")
     os.makedirs(dataset_dir, exist_ok=True)
-    shutil.copy(voice_path, os.path.join(dataset_dir, "voice.wav"))
+    for i, url in enumerate(voice_urls):
+        dst = os.path.join(dataset_dir, f"voice_{i:02d}.wav")
+        download_file(url, dst)
+    print(f"[Train] Downloaded {len(voice_urls)} voice file(s) to {dataset_dir}")
 
     # 3. Model output directory
     model_dir = os.path.join(MODELS_DIR, user_id)
