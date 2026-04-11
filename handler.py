@@ -407,8 +407,8 @@ try:
     config = Config()
     vc = VC(config)
     vc.get_vc('{model_basename}')
-    # NOTE: this RVC fork requires positional args including f0_file and file_index2
-    tgt_sr, audio_opt, times, _ = vc.vc_single(
+    # This RVC fork's vc_single returns (info_str, (tgt_sr, audio_opt))
+    info, audio_tuple = vc.vc_single(
         0,                    # sid
         '{vocals_path}',      # input_audio_path
         {pitch_shift},        # f0_up_key
@@ -422,6 +422,10 @@ try:
         {rms_mix_rate},       # rms_mix_rate
         {protect},            # protect
     )
+    print(f'RVC info: {{info}}')
+    if audio_tuple is None:
+        raise RuntimeError(f'vc_single returned None audio: {{info}}')
+    tgt_sr, audio_opt = audio_tuple
     wavfile.write('{output_wav}', tgt_sr, audio_opt)
     print(f'RVC inference done, sr={{tgt_sr}}')
 except Exception as e:
