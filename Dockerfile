@@ -64,6 +64,13 @@ RUN wget -q -O /app/rvc-webui/assets/pretrained_v2/f0G48k.pth \
 # Pre-generate matplotlib font cache
 RUN python -c "import matplotlib; print('Font cache generated')" || true
 
+# Pre-download Demucs htdemucs_ft model (~320MB)
+RUN python -c "\
+import torch; \
+from demucs.pretrained import get_model; \
+get_model('htdemucs_ft'); \
+print('htdemucs_ft model downloaded')"
+
 # Create volume mount point
 RUN mkdir -p /runpod-volume/rvc_models
 

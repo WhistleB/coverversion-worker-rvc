@@ -360,7 +360,7 @@ def handle_infer(job_input, tmpdir):
     demucs_out = os.path.join(tmpdir, "demucs_out")
     demucs_cmd = [
         "python", "-m", "demucs",
-        "-n", "htdemucs",
+        "-n", "htdemucs_ft",
         "--two-stems", "vocals",
         "-o", demucs_out,
         song_path,
@@ -370,8 +370,8 @@ def handle_infer(job_input, tmpdir):
         raise RuntimeError(f"Demucs failed: {result.stderr[-300:]}")
 
     song_name = os.path.splitext(os.path.basename(song_path))[0]
-    vocals_path = os.path.join(demucs_out, "htdemucs", song_name, "vocals.wav")
-    instrumental_path = os.path.join(demucs_out, "htdemucs", song_name, "no_vocals.wav")
+    vocals_path = os.path.join(demucs_out, "htdemucs_ft", song_name, "vocals.wav")
+    instrumental_path = os.path.join(demucs_out, "htdemucs_ft", song_name, "no_vocals.wav")
 
     if not os.path.exists(vocals_path):
         raise RuntimeError("Vocal separation failed")
